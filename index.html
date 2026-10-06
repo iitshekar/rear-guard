@@ -55,6 +55,11 @@ summary{padding:10px 0;font-weight:700;cursor:pointer}
 .row small{display:block;color:var(--steel);font-size:.82rem;margin-top:2px}
 select,.btn2{font:600 .95rem var(--font);padding:8px 10px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
+#things{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;min-height:30px;margin:0 0 14px}
+.chip{font-size:.88rem;font-weight:600;padding:5px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--line)}
+.chip.mover{border-color:var(--caution)} .chip.person{border-color:var(--danger)}
+#ask{display:block;width:100%;margin:0 0 10px;padding:14px;border-radius:14px;border:2px solid var(--ink);background:transparent;color:var(--ink);font:700 1.05rem/1 var(--font);cursor:pointer}
+#ask:disabled{opacity:.4}
 #err{color:var(--danger);font-weight:600;min-height:1.2em;margin:4px 0}
 @media (prefers-reduced-motion:reduce){.arc{transition:none}}
 </style>
@@ -73,6 +78,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
   </svg>
   <div id="status">Ready</div>
   <p id="detail">Tap Start, then put your earphones in</p>
+  <div id="things" aria-live="polite"></div>
 </section>
 
 <div class="view mirror" id="view">
@@ -83,8 +89,9 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
 
 <p id="err" role="alert"></p>
 <button id="go" disabled>Loading detector…</button>
+<button id="ask" disabled>What's behind me?</button>
 
-<p class="how">Hold the phone normally in front of you. The <b>front camera</b> looks over your shoulder and watches what's behind you, like a rear-view mirror. Everything runs on this phone; no video is uploaded.</p>
+<p class="how">Hold the phone normally in front of you. The <b>front camera</b> looks over your shoulder and watches what's behind you, like a rear-view mirror. It names people, vehicles, animals and about 70 everyday objects. Everything runs on this phone; no video is uploaded.</p>
 
 <details>
   <summary>Settings</summary>
@@ -92,6 +99,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
     <select id="cam"><option value="user">Front camera</option><option value="environment">Back camera</option></select></div>
   <div class="row"><label for="mode">Voice updates<small>Changes only keeps quiet until something new happens</small></label>
     <select id="mode"><option value="change">Changes only</option><option value="interval">Every 3 seconds</option></select></div>
+  <div class="row"><label for="what">Announce<small>Everything names objects too, such as a bag or a chair</small></label>
+    <select id="what"><option value="all">Everything</option><option value="movers">People, vehicles, animals</option></select></div>
   <div class="row"><label for="beep">Warning beeps when someone is close</label><input type="checkbox" id="beep" checked></div>
   <div class="row"><label for="swap">Swap left and right<small>Use if it says "left" when the person is on your right</small></label><input type="checkbox" id="swap"></div>
   <div class="row"><label>Distance calibration<small id="calinfo">Using default estimate</small></label>
@@ -117,11 +126,12 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
   let K = store.get('K', 1.5);
   $('cam').value = store.get('cam', 'user');
   $('mode').value = store.get('mode', 'change');
+  $('what').value = store.get('what', 'all');
   $('beep').checked = store.get('beep', true);
   $('swap').checked = store.get('swap', false);
   const showCal = () => $('calinfo').textContent = store.get('K', null) ? 'Calibrated on this phone' : 'Using default estimate';
   showCal();
-  ['cam','mode'].forEach(id => $(id).onchange = e => { store.set(id, e.target.value); if (id === 'cam' && running) restartCamera(); });
+  ['cam','mode','what'].forEach(id => $(id).onchange = e => { store.set(id, e.target.value); if (id === 'cam' && running) restartCamera(); });
   ['beep','swap'].forEach(id => $(id).onchange = e => store.set(id, e.target.checked));
 
   // ---------- model ----------
@@ -155,7 +165,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
     g.gain.exponentialRampToValueAtTime(0.0001, t+0.12);
     o.start(t); o.stop(t+0.13);
   }
-  $('testv').onclick = () => { say('Rear guard voice test. Person behind you, about 3 metres, on your left.', true); };
+  $('testv').onclick = () => { say('Rear guard voice test. Behind you: a person, about 3 metres, on your left. A chair.', true); };
 
   // ---------- camera ----------
   let stream = null, running = false, wakeLock = null;
@@ -190,30 +200,58 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
     try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch(e){}
     say('Rear guard on. Watching behind you.', true);
     try { await openCamera(); } catch(e){ fail(e); return; }
-    running = true; goBtn.textContent = 'Stop'; goBtn.classList.add('stop');
+    running = true; goBtn.textContent = 'Stop'; goBtn.classList.add('stop'); $('ask').disabled = false;
     resetState(); keepAwake(); loop();
   };
   function stop(){
     running = false;
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
     try { wakeLock && wakeLock.release(); } catch(e){}
-    goBtn.textContent = 'Start'; goBtn.classList.remove('stop');
+    goBtn.textContent = 'Start'; goBtn.classList.remove('stop'); $('ask').disabled = true; $('things').textContent = '';
     fpsEl.textContent = 'not running';
     setGauge(null); statusEl.textContent = 'Stopped'; detailEl.textContent = 'Tap Start to watch again';
     document.body.classList.remove('alert-close');
     ctx.clearRect(0,0,canvas.width,canvas.height);
   }
 
+  // ---------- what the detector knows ----------
+  // Typical real heights (m) let the pinhole model estimate distance for more than people.
+  const HEIGHT = { person:1.7, bicycle:1.0, car:1.5, motorcycle:1.1, bus:3.2, truck:3.0, train:3.8, boat:1.5, airplane:4,
+    bird:0.25, cat:0.3, dog:0.6, horse:1.6, sheep:0.9, cow:1.4, elephant:3, bear:1.2, zebra:1.4, giraffe:4.5 };
+  const VEHICLES = ['bicycle','car','motorcycle','bus','truck','train','boat','airplane'];
+  const isMover = c => c in HEIGHT;
+  const NICE = { 'tv':'television', 'dining table':'table', 'potted plant':'plant', 'cell phone':'phone', 'sports ball':'ball',
+    'hair drier':'hair dryer', 'remote':'remote control', 'mouse':'computer mouse', 'airplane':'plane' };
+  const PLURAL = { person:'people', mouse:'computer mice', knife:'knives', sheep:'sheep', skis:'pairs of skis', scissors:'pairs of scissors',
+    bus:'buses', 'wine glass':'wine glasses', 'hair drier':'hair dryers' };
+  const nameOf = (c, n) => {
+    if (n > 1) {
+      if (PLURAL[c]) return PLURAL[c];
+      const w = NICE[c] || c;
+      return /(s|sh|ch|x)$/.test(w) ? w + 'es' : w + 's';
+    }
+    return c === 'person' ? 'person' : (NICE[c] || c);
+  };
+  const withCount = (c, n) => {
+    if (n > 1) return n + ' ' + nameOf(c, n);
+    const w = nameOf(c, 1);
+    if (c === 'skis' || c === 'scissors') return 'a pair of ' + c;
+    return (/^[aeiou]/.test(w) ? 'an ' : 'a ') + w;
+  };
+  const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+  const priority = c => c === 'person' ? 0 : VEHICLES.includes(c) ? 1 : isMover(c) ? 2 : 3;
+
   // ---------- tracking state ----------
-  let seenFrames, lastSeenT, hist, ann, latest = null;
+  let frameCounts, seen, lastSeenMover, hist, ann, latest = null, stableInv = {}, lastPreds = [];
   function resetState(){
-    seenFrames = 0; lastSeenT = 0; hist = [];
-    ann = { present:false, count:0, band:'far', t:0, approachT:0 };
+    frameCounts = []; hist = []; stableInv = {}; lastSeenMover = 0;
+    ann = { inv:{}, moverPresent:false, band:'far', t:0, approachT:0 };
   }
   const RANK = { far:1, near:2, close:3 };
   const bandOf = d => d < 2 ? 'close' : d < 5 ? 'near' : 'far';
   const fmtM = d => d < 3 ? (Math.round(d*2)/2).toString() : Math.round(d).toString();
   const spokenM = d => { const s = fmtM(d); return (s === '1' ? '1 metre' : s + ' metres'); };
+  const distOf = (p, H) => Math.max(0.5, Math.min(40, K * (HEIGHT[p.class] / 1.7) / (p.bbox[3] / H)));
 
   // In the raw camera image (front camera, or back camera aimed behind you),
   // the right side of the picture is on YOUR left.
@@ -232,6 +270,15 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
       if (i < n) el.classList.add('on', band);
     });
   }
+  function showChips(inv){
+    const box = $('things'); box.textContent = '';
+    Object.keys(inv).sort((x,y) => priority(x) - priority(y)).forEach(c => {
+      const el = document.createElement('span');
+      el.className = 'chip' + (c === 'person' ? ' person' : isMover(c) ? ' mover' : '');
+      el.textContent = (inv[c] > 1 ? inv[c] + ' ' : '') + nameOf(c, inv[c]);
+      box.appendChild(el);
+    });
+  }
 
   // ---------- main loop ----------
   let frames = 0, fpsT = performance.now();
@@ -239,7 +286,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
     if (!running) return;
     if (video.readyState >= 2 && model) {
       let preds = [];
-      try { preds = await model.detect(video, 10, 0.5); } catch(e){}
+      try { preds = await model.detect(video, 20, 0.5); } catch(e){}
       handle(preds);
       frames++;
       const now = performance.now();
@@ -248,67 +295,116 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
     setTimeout(loop, 0);
   }
 
+  // Describe a list of things, most important first; movers get distance and side.
+  function describe(inv, preds, W, H, max){
+    const parts = [];
+    Object.keys(inv).sort((x,y) => priority(x) - priority(y)).forEach(c => {
+      let t = withCount(c, inv[c]);
+      if (isMover(c)) {
+        const mine = preds.filter(p => p.class === c);
+        if (mine.length) {
+          const n = mine.reduce((a,b) => distOf(b,H) < distOf(a,H) ? b : a);
+          t += ', about ' + spokenM(distOf(n,H)) + ', ' + sideWords(sideOf(n.bbox, W));
+        }
+      }
+      parts.push(t);
+    });
+    if (!parts.length) return '';
+    const shown = parts.slice(0, max), more = parts.length - shown.length;
+    return shown.join('. ') + (more > 0 ? '. And ' + more + ' more thing' + (more > 1 ? 's' : '') : '');
+  }
+
   function handle(preds){
     const W = video.videoWidth, H = video.videoHeight, now = performance.now();
-    const people = preds.filter(p => p.class === 'person');
-    draw(people, W, H);
+    const moversOnly = $('what').value === 'movers';
+    const used = preds.filter(p => !moversOnly || isMover(p.class));
+    lastPreds = used;
+    draw(used, W, H);
 
-    if (people.length) { seenFrames++; lastSeenT = now; } else { seenFrames = 0; }
-    const present = ann.present ? (now - lastSeenT < 1200) : seenFrames >= 2;
+    // Smooth out flicker: a thing counts if it was seen in at least 3 of the last 6 checks.
+    const cnt = {}; used.forEach(p => cnt[p.class] = (cnt[p.class] || 0) + 1);
+    frameCounts.push(cnt); if (frameCounts.length > 6) frameCounts.shift();
+    const classes = new Set(); frameCounts.forEach(f => Object.keys(f).forEach(c => classes.add(c)));
+    const inv = {};
+    classes.forEach(c => {
+      const v = frameCounts.map(f => f[c] || 0).sort((x,y) => x - y);
+      const stable = v.length >= 3 ? v[Math.max(0, v.length - 3)] : 0;
+      if (stable > 0) inv[c] = stable;
+    });
+    stableInv = inv;
+    showChips(inv);
 
-    if (!present) {
+    // Nearest moving thing (person, vehicle, animal) drives the gauge and warnings.
+    const movers = used.filter(p => isMover(p.class) && inv[p.class]);
+    if (movers.length) lastSeenMover = now;
+    const moverPresent = movers.length > 0 || (ann.moverPresent && now - lastSeenMover < 1200);
+    let near = null, dist = 99, band = null, side = 'centre';
+    if (movers.length) {
+      near = movers.reduce((a,b) => distOf(b,H) < distOf(a,H) ? b : a);
+      dist = distOf(near, H); band = bandOf(dist); side = sideOf(near.bbox, W);
+      if (near.class === 'person') latest = near.bbox[3] / H;
+      hist.push({ t: now, d: dist, c: near.class }); while (hist.length && now - hist[0].t > 1500) hist.shift();
+    } else if (!moverPresent) { hist = []; }
+    const old = near && hist.find(h => now - h.t > 900 && h.c === near.class);
+    const approaching = !!(old && (old.d - dist) > 0.7 && dist < 8);
+
+    // Screen
+    if (near) {
+      setGauge(band);
+      document.body.classList.toggle('alert-close', band === 'close');
+      statusEl.textContent = approaching ? cap(nameOf(near.class,1)) + ' approaching' : cap(withCount(near.class, inv[near.class] || 1).replace(/^an? /,''));
+      detailEl.textContent = 'Nearest about ' + fmtM(dist) + ' m, ' + sideWords(side);
+      if (band === 'close' && now - lastBeep > 500) { beep(); lastBeep = now; }
+    } else if (!moverPresent) {
       setGauge(null); document.body.classList.remove('alert-close');
-      statusEl.textContent = 'Clear'; detailEl.textContent = 'Nobody behind you';
-      hist = []; latest = null;
-      if (ann.present && say('All clear behind you.')) { ann.present = false; ann.count = 0; ann.band = 'far'; ann.t = now; }
-      return;
+      const n = Object.keys(inv).length;
+      statusEl.textContent = n ? 'No one moving' : 'Clear';
+      detailEl.textContent = n ? 'Objects behind you are listed below' : 'Nothing detected behind you';
     }
-    if (!people.length) return; // brief miss: keep last state on screen
 
-    // nearest person = tallest box
-    const near = people.reduce((a,b) => b.bbox[3] > a.bbox[3] ? b : a);
-    const frac = near.bbox[3] / H;
-    const dist = Math.max(0.5, Math.min(30, K / frac));
-    latest = frac;
-    const band = bandOf(dist), side = sideOf(near.bbox, W), count = people.length;
-
-    hist.push({ t: now, d: dist }); while (hist.length && now - hist[0].t > 1500) hist.shift();
-    const old = hist.find(h => now - h.t > 900);
-    const approaching = old && (old.d - dist) > 0.7 && dist < 6;
-
-    setGauge(band);
-    document.body.classList.toggle('alert-close', band === 'close');
-    statusEl.textContent = approaching ? 'Approaching' : count === 1 ? '1 person' : count + ' people';
-    detailEl.textContent = 'Nearest about ' + fmtM(dist) + ' m, ' + sideWords(side);
-
-    if (band === 'close' && now - lastBeep > 500) { beep(); lastBeep = now; }
-
-    const who = count === 1 ? 'Person' : count + ' people';
-    let msg = null, urgent = false;
-    if (!ann.present) {
-      msg = who + ' behind you, about ' + spokenM(dist) + ', ' + sideWords(side) + '.';
-      urgent = band === 'close';
-    } else if (approaching && now - ann.approachT > 4000) {
-      msg = 'Someone approaching. ' + spokenM(dist) + ', ' + sideWords(side) + '.';
-      urgent = band === 'close';
+    // Voice: urgent warnings first, then new things, then routine updates.
+    let msg = null, urgent = false, nextBand = ann.band;
+    const added = {};
+    Object.keys(inv).forEach(c => { if ((inv[c] || 0) > (ann.inv[c] || 0)) added[c] = inv[c]; });
+    if (near && approaching && now - ann.approachT > 4000) {
+      msg = cap(nameOf(near.class,1)) + ' approaching. ' + spokenM(dist) + ', ' + sideWords(side) + '.';
+      urgent = band === 'close'; nextBand = band;
       if (urgent && navigator.vibrate) navigator.vibrate(300);
-    } else if (RANK[band] > RANK[ann.band]) {
-      msg = (band === 'close' ? 'Very close. ' : 'Closer. ') + spokenM(dist) + '.';
-      urgent = band === 'close';
-    } else if (count !== ann.count) {
-      msg = 'Now ' + (count === 1 ? 'one person' : count + ' people') + ' behind you.';
-    } else if ($('mode').value === 'interval' && now - ann.t > 3000) {
-      msg = (count === 1 ? '' : count + ' people. Nearest ') + spokenM(dist) + ', ' + sideWords(side) + '.';
+    } else if (near && RANK[band] > RANK[ann.band] && ann.moverPresent) {
+      msg = (band === 'close' ? 'Very close. ' : 'Closer. ') + cap(nameOf(near.class,1)) + ', ' + spokenM(dist) + '.';
+      urgent = band === 'close'; nextBand = band;
+    } else if (Object.keys(added).length) {
+      const addedPeople = Object.keys(added).some(isMover);
+      msg = (Object.keys(ann.inv).length ? 'New behind you: ' : 'Behind you: ') + describe(added, used, W, H, 4) + '.';
+      urgent = addedPeople && band === 'close';
+      if (near) nextBand = band;
+    } else if (!moverPresent && ann.moverPresent) {
+      msg = Object.keys(inv).length ? 'No one moving behind you now.' : 'All clear behind you.';
+      nextBand = 'far';
+    } else if ($('mode').value === 'interval' && now - ann.t > 3000 && Object.keys(inv).length) {
+      msg = describe(inv, used, W, H, 3) + '.';
     }
-    if (RANK[band] < RANK[ann.band]) ann.band = band; // moved away: note it quietly
+    if (near && RANK[band] < RANK[ann.band]) ann.band = band; // moved away: note it quietly
 
     if (msg && say(msg, urgent)) {
-      ann.present = true; ann.count = count; ann.band = band; ann.t = now;
+      ann.inv = Object.assign({}, inv); ann.moverPresent = moverPresent; ann.band = nextBand; ann.t = now;
       if (approaching) ann.approachT = now;
+    } else if (!msg) {
+      // things that left: forget them quietly so they are announced again if they return
+      Object.keys(ann.inv).forEach(c => { if (!inv[c]) delete ann.inv[c]; else if (inv[c] < ann.inv[c]) ann.inv[c] = inv[c]; });
+      if (!moverPresent) ann.moverPresent = false;
     }
   }
 
-  function draw(people, W, H){
+  // On-demand full report
+  $('ask').onclick = () => {
+    if (!running) return;
+    const W = video.videoWidth, H = video.videoHeight;
+    const text = describe(stableInv, lastPreds, W, H, 8);
+    say(text ? 'Behind you: ' + text + '.' : 'I cannot see anything I recognise behind you.', true);
+  };
+
+  function draw(items, W, H){
     const r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
     canvas.width = r.width * dpr; canvas.height = r.height * dpr;
     ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,r.width,r.height);
@@ -316,17 +412,20 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
     // match object-fit: contain
     const s = Math.min(r.width / W, r.height / H), ox = (r.width - W*s)/2, oy = (r.height - H*s)/2;
     const mirror = $('view').classList.contains('mirror');
-    ctx.lineWidth = 3; ctx.font = '700 14px Archivo, system-ui, sans-serif';
-    people.forEach(p => {
+    ctx.lineWidth = 3; ctx.font = '700 13px Archivo, system-ui, sans-serif';
+    items.forEach(p => {
       let [x,y,w,h] = p.bbox;
       if (mirror) x = W - x - w;
-      const d = Math.max(0.5, Math.min(30, K / (h / H)));
-      const col = d < 2 ? '#D7263D' : d < 5 ? '#D99A00' : '#2E8B57';
+      let col = '#5B8FB9', label = nameOf(p.class, 1);
+      if (isMover(p.class)) {
+        const d = distOf(p, H);
+        col = d < 2 ? '#D7263D' : d < 5 ? '#D99A00' : '#2E8B57';
+        label += ' ' + fmtM(d) + ' m';
+      }
       ctx.strokeStyle = col; ctx.strokeRect(ox + x*s, oy + y*s, w*s, h*s);
-      const label = fmtM(d) + ' m  ' + Math.round(p.score*100) + '%';
       const tw = ctx.measureText(label).width + 10;
-      ctx.fillStyle = col; ctx.fillRect(ox + x*s, oy + y*s, tw, 20);
-      ctx.fillStyle = '#fff'; ctx.fillText(label, ox + x*s + 5, oy + y*s + 15);
+      ctx.fillStyle = col; ctx.fillRect(ox + x*s, oy + y*s, tw, 19);
+      ctx.fillStyle = '#fff'; ctx.fillText(label, ox + x*s + 5, oy + y*s + 14);
     });
   }
 
