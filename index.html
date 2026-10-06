@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rear Guard</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EEF1F4; --ink:#14202B; --steel:#5B6B7A; --panel:#FFFFFF; --line:#C9D2DB;
+  --safe:#2E8B57; --caution:#D99A00; --danger:#D7263D;
+  --font:"Archivo",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){--bg:#121A22;--ink:#E8EEF3;--steel:#93A3B2;--panel:#1B2530;--line:#2C3A47}
+}
+:root[data-theme="dark"]{--bg:#121A22;--ink:#E8EEF3;--steel:#93A3B2;--panel:#1B2530;--line:#2C3A47}
+*,*::before,*::after{box-sizing:inherit}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font)}
+body{max-width:560px;margin:0 auto;padding:16px 18px 32px}
+header{display:flex;justify-content:space-between;align-items:baseline}
+h1{font-size:1.35rem;font-stretch:125%;font-weight:800;margin:0;letter-spacing:-.01em}
+#fps{color:var(--steel);font-size:.85rem;font-variant-numeric:tabular-nums}
+
+/* Hero: the parking-sensor gauge */
+.gauge{margin:18px 0 6px;display:flex;flex-direction:column;align-items:center}
+.gauge svg{width:100%;max-width:340px;height:auto;display:block}
+.arc{fill:none;stroke:var(--line);stroke-width:16;stroke-linecap:round;transition:stroke .15s}
+.arc.on.far{stroke:var(--safe)} .arc.on.near{stroke:var(--caution)} .arc.on.close{stroke:var(--danger)}
+#status{font-size:2.6rem;font-stretch:112%;font-weight:800;line-height:1.05;text-align:center;margin:6px 0 4px;min-height:2.8rem}
+#detail{color:var(--steel);text-align:center;font-size:1.05rem;min-height:1.4em;margin:0 0 16px}
+body.alert-close #status{color:var(--danger)}
+
+.view{position:relative;border-radius:14px;overflow:hidden;background:#000;aspect-ratio:3/4;max-height:42vh;margin:0 auto;width:100%}
+.view video,.view canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.view.mirror video{transform:scaleX(-1)}
+.view .hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#cfd8e0;text-align:center;padding:24px;font-size:.95rem}
+
+#go{display:block;width:100%;margin:16px 0 10px;padding:18px;border:0;border-radius:14px;background:var(--ink);color:var(--bg);font:800 1.2rem/1 var(--font);font-stretch:112%;cursor:pointer}
+#go.stop{background:var(--danger);color:#fff}
+#go:disabled{opacity:.5}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--caution);outline-offset:2px}
+
+.how{color:var(--steel);font-size:.95rem;line-height:1.5;margin:4px 0 14px}
+details{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px 14px;margin-top:8px}
+summary{padding:10px 0;font-weight:700;cursor:pointer}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.row label{flex:1}
+.row small{display:block;color:var(--steel);font-size:.82rem;margin-top:2px}
+select,.btn2{font:600 .95rem var(--font);padding:8px 10px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+input[type=checkbox]{width:22px;height:22px;accent-color:var(--ink)}
+#err{color:var(--danger);font-weight:600;min-height:1.2em;margin:4px 0}
+@media (prefers-reduced-motion:reduce){.arc{transition:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Rear Guard</h1>
+  <span id="fps">not running</span>
+</header>
+
+<section class="gauge" aria-live="polite">
+  <svg viewBox="0 0 300 130" aria-hidden="true">
+    <path id="a3" class="arc" d="M30 120 A120 120 0 0 1 270 120"/>
+    <path id="a2" class="arc" d="M70 120 A80 80 0 0 1 230 120"/>
+    <path id="a1" class="arc" d="M110 120 A40 40 0 0 1 190 120"/>
+  </svg>
+  <div id="status">Ready</div>
+  <p id="detail">Tap Start, then put your earphones in</p>
+</section>
+
+<div class="view mirror" id="view">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="overlay"></canvas>
+  <div class="hint" id="hint">Camera preview appears here</div>
+</div>
+
+<p id="err" role="alert"></p>
+<button id="go" disabled>Loading detector…</button>
+
+<p class="how">Hold the phone normally in front of you. The <b>front camera</b> looks over your shoulder and watches what's behind you, like a rear-view mirror. Everything runs on this phone; no video is uploaded.</p>
+
+<details>
+  <summary>Settings</summary>
+  <div class="row"><label for="cam">Camera<small>Front sees behind you while you hold the phone normally</small></label>
+    <select id="cam"><option value="user">Front camera</option><option value="environment">Back camera</option></select></div>
+  <div class="row"><label for="mode">Voice updates<small>Changes only keeps quiet until something new happens</small></label>
+    <select id="mode"><option value="change">Changes only</option><option value="interval">Every 3 seconds</option></select></div>
+  <div class="row"><label for="beep">Warning beeps when someone is close</label><input type="checkbox" id="beep" checked></div>
+  <div class="row"><label for="swap">Swap left and right<small>Use if it says "left" when the person is on your right</small></label><input type="checkbox" id="swap"></div>
+  <div class="row"><label>Distance calibration<small id="calinfo">Using default estimate</small></label>
+    <button class="btn2" id="cal">Calibrate at 2 m</button></div>
+  <div class="row"><label>Voice check</label><button class="btn2" id="testv">Test voice</button></div>
+</details>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const video = $('video'), canvas = $('overlay'), ctx = canvas.getContext('2d');
+  const goBtn = $('go'), statusEl = $('status'), detailEl = $('detail'), errEl = $('err'), fpsEl = $('fps');
+
+  // ---------- settings (remembered on this phone) ----------
+  const store = {
+    get(k, d){ try { const v = localStorage.getItem('rg_'+k); return v === null ? d : JSON.parse(v); } catch(e){ return d; } },
+    set(k, v){ try { localStorage.setItem('rg_'+k, JSON.stringify(v)); } catch(e){} }
+  };
+  // Pinhole-camera model: distance ≈ K / (person height as fraction of frame height).
+  // Default K assumes a 1.7 m person and ~60° vertical field of view: 1.7 / (2·tan30°) ≈ 1.5
+  let K = store.get('K', 1.5);
+  $('cam').value = store.get('cam', 'user');
+  $('mode').value = store.get('mode', 'change');
+  $('beep').checked = store.get('beep', true);
+  $('swap').checked = store.get('swap', false);
+  const showCal = () => $('calinfo').textContent = store.get('K', null) ? 'Calibrated on this phone' : 'Using default estimate';
+  showCal();
+  ['cam','mode'].forEach(id => $(id).onchange = e => { store.set(id, e.target.value); if (id === 'cam' && running) restartCamera(); });
+  ['beep','swap'].forEach(id => $(id).onchange = e => store.set(id, e.target.checked));
+
+  // ---------- model ----------
+  let model = null;
+  cocoSsd.load({ base: 'lite_mobilenet_v2' }).then(m => {
+    model = m; goBtn.disabled = false; goBtn.textContent = 'Start';
+  }).catch(() => {
+    goBtn.textContent = 'Detector failed to load';
+    errEl.textContent = "Couldn't download the detector. Check the internet connection and reload the page.";
+  });
+
+  // ---------- voice + sound ----------
+  let lastSpeak = 0;
+  function say(text, urgent){
+    if (!('speechSynthesis' in window)) return true;
+    if (urgent) speechSynthesis.cancel();
+    else if (speechSynthesis.speaking || speechSynthesis.pending) return false;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.15;
+    speechSynthesis.speak(u);
+    lastSpeak = performance.now();
+    return true;
+  }
+  let audioCtx = null, lastBeep = 0;
+  function beep(){
+    if (!$('beep').checked || !audioCtx) return;
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = 1400; o.connect(g); g.connect(audioCtx.destination);
+    const t = audioCtx.currentTime;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+0.12);
+    o.start(t); o.stop(t+0.13);
+  }
+  $('testv').onclick = () => { say('Rear guard voice test. Person behind you, about 3 metres, on your left.', true); };
+
+  // ---------- camera ----------
+  let stream = null, running = false, wakeLock = null;
+  async function openCamera(){
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    const facing = $('cam').value;
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: facing }, width: { ideal: 640 }, height: { ideal: 480 } }
+    });
+    video.srcObject = stream;
+    await video.play();
+    $('view').classList.toggle('mirror', facing === 'user');
+    $('hint').style.display = 'none';
+  }
+  async function restartCamera(){ try { await openCamera(); } catch(e){ fail(e); } }
+  function fail(e){
+    stop();
+    errEl.textContent = (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError'))
+      ? 'Camera is blocked. Allow camera access for this site in your browser settings, then tap Start again.'
+      : 'Could not open the camera: ' + (e && e.message ? e.message : e);
+  }
+  async function keepAwake(){
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e){}
+  }
+  document.addEventListener('visibilitychange', () => { if (running && document.visibilityState === 'visible') keepAwake(); });
+
+  goBtn.onclick = async () => {
+    if (running) { stop(); return; }
+    errEl.textContent = '';
+    // Sound and speech must be unlocked inside a tap (iPhone rule)
+    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch(e){}
+    say('Rear guard on. Watching behind you.', true);
+    try { await openCamera(); } catch(e){ fail(e); return; }
+    running = true; goBtn.textContent = 'Stop'; goBtn.classList.add('stop');
+    resetState(); keepAwake(); loop();
+  };
+  function stop(){
+    running = false;
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    try { wakeLock && wakeLock.release(); } catch(e){}
+    goBtn.textContent = 'Start'; goBtn.classList.remove('stop');
+    fpsEl.textContent = 'not running';
+    setGauge(null); statusEl.textContent = 'Stopped'; detailEl.textContent = 'Tap Start to watch again';
+    document.body.classList.remove('alert-close');
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+  }
+
+  // ---------- tracking state ----------
+  let seenFrames, lastSeenT, hist, ann, latest = null;
+  function resetState(){
+    seenFrames = 0; lastSeenT = 0; hist = [];
+    ann = { present:false, count:0, band:'far', t:0, approachT:0 };
+  }
+  const RANK = { far:1, near:2, close:3 };
+  const bandOf = d => d < 2 ? 'close' : d < 5 ? 'near' : 'far';
+  const fmtM = d => d < 3 ? (Math.round(d*2)/2).toString() : Math.round(d).toString();
+  const spokenM = d => { const s = fmtM(d); return (s === '1' ? '1 metre' : s + ' metres'); };
+
+  // In the raw camera image (front camera, or back camera aimed behind you),
+  // the right side of the picture is on YOUR left.
+  function sideOf(box, W){
+    const cx = (box[0] + box[2]/2) / W;
+    let s = cx > 0.6 ? 'left' : cx < 0.4 ? 'right' : 'centre';
+    if ($('swap').checked && s !== 'centre') s = s === 'left' ? 'right' : 'left';
+    return s;
+  }
+  const sideWords = s => s === 'centre' ? 'directly behind you' : 'on your ' + s;
+
+  function setGauge(band){
+    const n = band ? RANK[band] : 0;
+    ['a3','a2','a1'].forEach((id,i) => {
+      const el = $(id); el.classList.remove('on','far','near','close');
+      if (i < n) el.classList.add('on', band);
+    });
+  }
+
+  // ---------- main loop ----------
+  let frames = 0, fpsT = performance.now();
+  async function loop(){
+    if (!running) return;
+    if (video.readyState >= 2 && model) {
+      let preds = [];
+      try { preds = await model.detect(video, 10, 0.5); } catch(e){}
+      handle(preds);
+      frames++;
+      const now = performance.now();
+      if (now - fpsT > 1000) { fpsEl.textContent = (frames*1000/(now-fpsT)).toFixed(1) + ' checks/sec'; frames = 0; fpsT = now; }
+    }
+    setTimeout(loop, 0);
+  }
+
+  function handle(preds){
+    const W = video.videoWidth, H = video.videoHeight, now = performance.now();
+    const people = preds.filter(p => p.class === 'person');
+    draw(people, W, H);
+
+    if (people.length) { seenFrames++; lastSeenT = now; } else { seenFrames = 0; }
+    const present = ann.present ? (now - lastSeenT < 1200) : seenFrames >= 2;
+
+    if (!present) {
+      setGauge(null); document.body.classList.remove('alert-close');
+      statusEl.textContent = 'Clear'; detailEl.textContent = 'Nobody behind you';
+      hist = []; latest = null;
+      if (ann.present && say('All clear behind you.')) { ann.present = false; ann.count = 0; ann.band = 'far'; ann.t = now; }
+      return;
+    }
+    if (!people.length) return; // brief miss: keep last state on screen
+
+    // nearest person = tallest box
+    const near = people.reduce((a,b) => b.bbox[3] > a.bbox[3] ? b : a);
+    const frac = near.bbox[3] / H;
+    const dist = Math.max(0.5, Math.min(30, K / frac));
+    latest = frac;
+    const band = bandOf(dist), side = sideOf(near.bbox, W), count = people.length;
+
+    hist.push({ t: now, d: dist }); while (hist.length && now - hist[0].t > 1500) hist.shift();
+    const old = hist.find(h => now - h.t > 900);
+    const approaching = old && (old.d - dist) > 0.7 && dist < 6;
+
+    setGauge(band);
+    document.body.classList.toggle('alert-close', band === 'close');
+    statusEl.textContent = approaching ? 'Approaching' : count === 1 ? '1 person' : count + ' people';
+    detailEl.textContent = 'Nearest about ' + fmtM(dist) + ' m, ' + sideWords(side);
+
+    if (band === 'close' && now - lastBeep > 500) { beep(); lastBeep = now; }
+
+    const who = count === 1 ? 'Person' : count + ' people';
+    let msg = null, urgent = false;
+    if (!ann.present) {
+      msg = who + ' behind you, about ' + spokenM(dist) + ', ' + sideWords(side) + '.';
+      urgent = band === 'close';
+    } else if (approaching && now - ann.approachT > 4000) {
+      msg = 'Someone approaching. ' + spokenM(dist) + ', ' + sideWords(side) + '.';
+      urgent = band === 'close';
+      if (urgent && navigator.vibrate) navigator.vibrate(300);
+    } else if (RANK[band] > RANK[ann.band]) {
+      msg = (band === 'close' ? 'Very close. ' : 'Closer. ') + spokenM(dist) + '.';
+      urgent = band === 'close';
+    } else if (count !== ann.count) {
+      msg = 'Now ' + (count === 1 ? 'one person' : count + ' people') + ' behind you.';
+    } else if ($('mode').value === 'interval' && now - ann.t > 3000) {
+      msg = (count === 1 ? '' : count + ' people. Nearest ') + spokenM(dist) + ', ' + sideWords(side) + '.';
+    }
+    if (RANK[band] < RANK[ann.band]) ann.band = band; // moved away: note it quietly
+
+    if (msg && say(msg, urgent)) {
+      ann.present = true; ann.count = count; ann.band = band; ann.t = now;
+      if (approaching) ann.approachT = now;
+    }
+  }
+
+  function draw(people, W, H){
+    const r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,r.width,r.height);
+    if (!W || !H) return;
+    // match object-fit: contain
+    const s = Math.min(r.width / W, r.height / H), ox = (r.width - W*s)/2, oy = (r.height - H*s)/2;
+    const mirror = $('view').classList.contains('mirror');
+    ctx.lineWidth = 3; ctx.font = '700 14px Archivo, system-ui, sans-serif';
+    people.forEach(p => {
+      let [x,y,w,h] = p.bbox;
+      if (mirror) x = W - x - w;
+      const d = Math.max(0.5, Math.min(30, K / (h / H)));
+      const col = d < 2 ? '#D7263D' : d < 5 ? '#D99A00' : '#2E8B57';
+      ctx.strokeStyle = col; ctx.strokeRect(ox + x*s, oy + y*s, w*s, h*s);
+      const label = fmtM(d) + ' m  ' + Math.round(p.score*100) + '%';
+      const tw = ctx.measureText(label).width + 10;
+      ctx.fillStyle = col; ctx.fillRect(ox + x*s, oy + y*s, tw, 20);
+      ctx.fillStyle = '#fff'; ctx.fillText(label, ox + x*s + 5, oy + y*s + 15);
+    });
+  }
+
+  // ---------- calibration: someone stands 2 m away, whole body in view ----------
+  $('cal').onclick = () => {
+    if (!running || !latest) { errEl.textContent = 'To calibrate: tap Start, have someone stand exactly 2 m behind you with their whole body in view, then tap Calibrate.'; return; }
+    K = 2 * latest; store.set('K', K); showCal(); errEl.textContent = '';
+    say('Calibrated. That person is now 2 metres.', true);
+  };
+})();
+</script>
+</body>
+</html>
